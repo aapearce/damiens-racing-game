@@ -332,20 +332,22 @@ function buildTrack() {
 
 // ---------- Scenery placement ----------
 function decorate(z1, z2, total) {
-  // FOREST: pine trees, denser, both sides
+  // FOREST: dense layered rainforest — near canopy, far canopy and understory on both sides
   for (let n = START_SEG + 8; n < z1 - 4; n++) {
-    if (n % 3 === 0) addSprite(n, "tree", -1 - rand(0.4, 2.2));
-    if (n % 4 === 0) addSprite(n, "tree",  1 + rand(0.4, 2.2));
-    if (n % 23 === 0) addSprite(n, "bush", randSign() * rand(1.1, 1.6));
+    // near treeline hugging the road
+    addSprite(n, "tree", (n % 2 ? 1 : -1) * (1.15 + rand(0.0, 0.7)));
+    // deeper canopy layer for a jungle wall
+    if (n % 2 === 0) addSprite(n, "tree", -1.9 - rand(0.2, 2.2));
+    if (n % 2 === 1) addSprite(n, "tree",  1.9 + rand(0.2, 2.2));
+    // understory shrubs/ferns close to the verge
+    if (n % 3 === 0) addSprite(n, "bush", -1.02 - rand(0.0, 0.35));
+    if (n % 3 === 1) addSprite(n, "bush",  1.02 + rand(0.0, 0.35));
   }
-  // BEACH: grandstand on the LEFT for a long stretch, palms on the right
-  const standStart = z1 + 220, standEnd = z1 + 620;
+  // BEACH: one long grandstand running ALONG the LEFT of the track, palms on the sea side (right)
+  const standStart = z1 + 180, standEnd = z1 + 720;
   for (let n = z1; n < z2 - 4; n++) {
-    if (n >= standStart && n < standEnd) {
-      if (n % 2 === 0) addSprite(n, "stand", -1.7);           // grandstand wall
-    }
+    if (segments[n] && n >= standStart && n < standEnd) segments[n].stand = true; // continuous roadside stand
     if (n % 5 === 0) addSprite(n, "palm", 1 + rand(0.3, 1.6)); // palms on the sea side
-    if (n % 9 === 0) addSprite(n, "palm", -1 - rand(1.4, 2.4));
   }
   // NEON: glowing pylons / arcade signs alternating
   for (let n = z2; n < total - 6; n++) {
@@ -355,7 +357,7 @@ function decorate(z1, z2, total) {
   }
 }
 function addSprite(n, type, offset) {
-  if (segments[n]) segments[n].sprites.push({ type, offset });
+  if (segments[n]) segments[n].sprites.push({ type, offset, seed: Math.random() });
 }
 function rand(a,b){ return a + Math.random()*(b-a); }
 function randSign(){ return Math.random()<0.5 ? -1 : 1; }
@@ -654,6 +656,52 @@ function renderSky(){
   ctx.restore();
 }
 
+// ---------- Continuous roadside grandstand (follows the road geometry, faces the track) ----------
+const STAND_FRONT = -1.28;      // offset of the face that looks onto the track (left side)
+const STAND_WORLD_H = 1700;     // world height of the structure
+function standX(p, off){ return p.screen.x + off * p.screen.w; }
+function standY(p, frac){ return p.screen.y - p.screen.scale * STAND_WORLD_H * frac * H * 0.5; }
+function renderStand(s){
+  const a = s.p1, b = s.p2;
+  const xa = standX(a, STAND_FRONT), xb = standX(b, STAND_FRONT);
+  const band = (lo,hi,col)=> poly(xa, standY(a,lo), xb, standY(b,lo), xb, standY(b,hi), xa, standY(a,hi), col);
+  // structure, bottom -> top
+  band(0.00,0.11,"#1d212c");                 // perimeter wall
+  band(0.045,0.085,"#e23b57");               // ad hoarding stripe
+  band(0.11,0.40,"#6c7488");                 // lower deck (concrete)
+  band(0.40,0.45,"#242a3a");                 // concourse landing
+  band(0.45,0.69,"#6c7488");                 // middle deck
+  band(0.69,0.74,"#242a3a");                 // concourse landing
+  band(0.74,0.95,"#6c7488");                 // upper deck
+  band(0.95,1.00,"#e23b57");                 // roof fascia
+  band(1.00,1.07,"#565e7c");                 // roof slab (overhang)
+  // crowd in each deck
+  standCrowd(s, 0.14, 0.38, 3);
+  standCrowd(s, 0.48, 0.67, 3);
+  standCrowd(s, 0.77, 0.93, 2);
+}
+function standCrowd(s, lo, hi, rows){
+  const a=s.p1, b=s.p2;
+  const r1 = a.screen.w*0.016, r2 = b.screen.w*0.016;
+  if (r1 < 0.8) return;                       // too far to bother
+  const t = performance.now()/1000;
+  const rnd=(k)=>{ const v=Math.sin(s.index*0.913 + k*97.13)*43758.5; return v-Math.floor(v); };
+  const nDots = 3;
+  for (let r=0;r<rows;r++){
+    const frac = lo + (r+0.5)/rows*(hi-lo);
+    for (let c=0;c<nDots;c++){
+      const u = (c+0.5)/nDots;                                  // along the segment, fills gaps & adds depth
+      const off = STAND_FRONT + (rnd(r*7+c)-0.5)*0.05;          // slight in/out jitter
+      const px = standX(a,off)*(1-u) + standX(b,off)*u;
+      const py = standY(a,frac)*(1-u) + standY(b,frac)*u;
+      const pr = r1*(1-u) + r2*u;
+      const flick = Math.sin(t*4 + s.index*0.4 + r*1.7 + c) > 0.4;
+      ctx.fillStyle = `hsl(${(s.index*13 + r*61 + c*29)%360},44%,${flick?58:40}%)`;
+      ctx.beginPath(); ctx.arc(px,py,pr,0,7); ctx.fill();
+    }
+  }
+}
+
 function render(){
   renderSky();
 
@@ -684,6 +732,15 @@ function render(){
     maxy = s.p2.screen.y;
   }
 
+  // continuous roadside grandstand — far-to-near so nearer slices overlap farther ones
+  for (let n=drawDistance-1; n>=0; n--){
+    const i = base.index + n;
+    if (i >= segments.length) continue;
+    const s = segments[i];
+    if (!s.stand || !s.p1.screen.scale || s.p1.camera.z <= cameraDepth) continue;
+    renderStand(s);
+  }
+
   // sprites back-to-front
   for (let n=drawDistance-1; n>=0; n--){
     const i = base.index + n;
@@ -695,7 +752,7 @@ function render(){
       const scale = s.p1.screen.scale;
       const destX = s.p1.screen.x + scale * sp.offset * roadWidth * W/2;
       const destY = s.p1.screen.y;
-      drawSprite(sp.type, scale, destX, destY, s.clip);
+      drawSprite(sp.type, scale, destX, destY, s.clip, sp.seed);
     }
   }
 
@@ -706,30 +763,67 @@ function render(){
 function withClip(clipY, fn){ ctx.save(); ctx.beginPath(); ctx.rect(0,0,W, clipY>0?clipY:H); ctx.clip(); fn(); ctx.restore(); }
 const SPRITE_K = 0.3 * (1/80) * roadWidth;   // OutRun-style sprite scaling (~7.5)
 function spriteSize(type, scale){
-  const base = { tree:[120,240], bush:[120,90], palm:[150,310], stand:[440,300],
+  const base = { tree:[170,260], bush:[150,95], palm:[150,310], stand:[440,300],
                  person:[55,115], neon:[95,260], banner:[1700,280] }[type] || [120,200];
   const f = scale * (W/2) * SPRITE_K;
   // clamp so a sprite that gets very close to the camera can't blow up the
   // draw cost (esp. the grandstand crowd loop).
   return [Math.min(base[0]*f, W*2.5), Math.min(base[1]*f, H*2.5)];
 }
-function drawSprite(type, scale, cx, baseY, clipY){
+function drawSprite(type, scale, cx, baseY, clipY, seed=0){
   let [w,h] = spriteSize(type, scale);
   if (w < 1 || h < 1) return;
+  // stable per-sprite pseudo-random in [0,1) so each tree/bush varies but never flickers
+  const rnd = (k) => { const v = Math.sin(seed*127.1 + k*311.7) * 43758.5453; return v - Math.floor(v); };
   withClip(clipY, () => {
     const x = cx, top = baseY - h, t = performance.now()/1000;
     switch(type){
       case "tree": {
-        ctx.fillStyle = "#5b3a1a"; ctx.fillRect(x-w*0.07, baseY-h*0.28, w*0.14, h*0.28);
-        for (let k=0;k<3;k++){
-          const ty = top + h*0.18*k, tw = w*(1 - k*0.22), th = h*0.42;
-          ctx.fillStyle = k===2 ? "#1f7a2a" : (k===1 ? "#218a2c" : "#1d6e26");
-          ctx.beginPath(); ctx.moveTo(x, ty); ctx.lineTo(x-tw/2, ty+th); ctx.lineTo(x+tw/2, ty+th); ctx.closePath(); ctx.fill();
+        // lush broadleaf rainforest tree: tapered trunk + layered, shaded canopy of leafy blobs
+        const lean = (rnd(1)-0.5)*w*0.10;
+        const trunkH = h*0.40, trunkW = Math.max(1.5, w*0.06);
+        ctx.fillStyle = "#43301d";                                        // trunk (tapered, slight lean)
+        ctx.beginPath();
+        ctx.moveTo(x-trunkW, baseY); ctx.lineTo(x+trunkW, baseY);
+        ctx.lineTo(x+trunkW*0.5+lean, baseY-trunkH); ctx.lineTo(x-trunkW*0.5+lean, baseY-trunkH);
+        ctx.closePath(); ctx.fill();
+        // canopy geometry
+        const cw = w*(0.62 + rnd(2)*0.30);          // broad rounded canopy
+        const ch = h*(0.66 + rnd(3)*0.14);
+        const ccx = x + lean;
+        const ccy = top + ch*0.52;
+        const hue = 108 + Math.floor(rnd(4)*34);    // varied jungle greens
+        const small = w < 46;                       // level-of-detail for distant trees
+        // dark silhouette base
+        ctx.fillStyle = `hsl(${hue}, 52%, 18%)`;
+        ctx.beginPath(); ctx.ellipse(ccx, ccy, cw*0.5, ch*0.5, 0,0,7); ctx.fill();
+        // mid-tone leafy lobes around the mass
+        const lobes = small ? 3 : 6;
+        for (let b=0;b<lobes;b++){
+          const a = (b/lobes)*6.283 + rnd(b+5)*1.4;
+          const bx = ccx + Math.cos(a)*cw*0.27, by = ccy + Math.sin(a)*ch*0.27;
+          const rr = 0.30 + rnd(b+11)*0.16;
+          ctx.fillStyle = `hsl(${hue + (rnd(b+20)*18-9)|0}, 50%, ${28+rnd(b+30)*12|0}%)`;
+          ctx.beginPath(); ctx.ellipse(bx, by, cw*rr, ch*rr, 0,0,7); ctx.fill();
+        }
+        // sunlit highlights on the upper-left
+        if (!small) for (let b=0;b<3;b++){
+          const bx = ccx - cw*0.16 + (rnd(b+40)-0.5)*cw*0.30;
+          const by = ccy - ch*0.20 - rnd(b+50)*ch*0.10;
+          ctx.fillStyle = `hsl(${hue+8}, 56%, ${46+rnd(b+60)*8|0}%)`;
+          ctx.beginPath(); ctx.ellipse(bx, by, cw*0.19, ch*0.16, 0,0,7); ctx.fill();
         }
         break; }
       case "bush": {
-        ctx.fillStyle = "#1f8a30";
-        ctx.beginPath(); ctx.ellipse(x, baseY-h*0.4, w*0.5, h*0.5, 0,0,7); ctx.fill();
+        // leafy understory clump (overlapping fronds), varied green
+        const hue = 110 + Math.floor(rnd(2)*30);
+        ctx.fillStyle = `hsl(${hue}, 55%, 20%)`;
+        ctx.beginPath(); ctx.ellipse(x, baseY-h*0.38, w*0.52, h*0.46, 0,0,7); ctx.fill();
+        for (let b=0;b<4;b++){
+          const bx = x + (rnd(b+1)-0.5)*w*0.6, by = baseY - h*0.30 - rnd(b+7)*h*0.30;
+          ctx.fillStyle = `hsl(${hue + (rnd(b+13)*16-8)|0}, 54%, ${30+rnd(b+19)*14|0}%)`;
+          ctx.beginPath(); ctx.ellipse(bx, by, w*0.26, h*0.24, 0,0,7); ctx.fill();
+        }
         break; }
       case "palm": {
         ctx.strokeStyle = "#7a5326"; ctx.lineWidth = Math.max(2,w*0.08); ctx.lineCap="round";
@@ -740,87 +834,8 @@ function drawSprite(type, scale, cx, baseY, clipY){
           ctx.beginPath(); ctx.moveTo(hub.x,hub.y);
           ctx.quadraticCurveTo(hub.x+Math.cos(ang)*w*0.4, hub.y+Math.sin(ang)*h*0.18, hub.x+Math.cos(ang)*w*0.7, hub.y+Math.sin(ang)*h*0.34+h*0.05); ctx.stroke(); }
         break; }
-      case "stand": {
-        // multi-tier grandstand: 3 raked decks split by concourses, perspective-compressed rows, under a canopy
-        const L = x - w/2, R = x + w/2;
-        const roofH  = h*0.13;                    // canopy
-        const frontH = h*0.09;                    // perimeter wall / hoarding
-        const seatTop = top + roofH;
-        const seatBot = baseY - frontH;
-        const bankH   = seatBot - seatTop;
-        const concH   = bankH*0.055;              // concourse landing band
-        const seatArea = bankH - 2*concH;
-        // deck vertical extents (lower deck tallest -> upper smallest, for depth)
-        const yLowB = seatBot,                 yLowT = yLowB - seatArea*0.40;
-        const yCcB  = yLowT,                    yCcBt = yLowT - concH;          // concourse B
-        const yMidB = yCcBt,                   yMidT = yMidB - seatArea*0.34;
-        const yCcA  = yMidT,                    yCcAt = yMidT - concH;          // concourse A
-        const yUpB  = yCcAt,                    yUpT  = seatTop;
-
-        // backing structure (concrete)
-        ctx.fillStyle = "#6c7488"; ctx.fillRect(L, seatTop, w, bankH);
-
-        // one raked deck: rows compressed toward the back (top), people shrink to match
-        const drawDeck = (yTop, yBot, rows, sizeMul) => {
-          const th = yBot - yTop, f = (u) => u*(1.4 - 0.4*u);     // concave -> tight at top
-          for (let r = rows-1; r >= 0; r--){                      // back-to-front so front rows overlap
-            const rowBot = yBot - th*f(r/rows);
-            const rowTop = yBot - th*f((r+1)/rows);
-            const stepH = rowBot - rowTop;
-            ctx.fillStyle = "#363c52"; ctx.fillRect(L, rowTop, w, stepH*0.45);                 // seat-back shadow (riser)
-            ctx.fillStyle = "#828aa2"; ctx.fillRect(L, rowTop + stepH*0.45, w, stepH*0.55);    // seat row (lit tread)
-            const pr  = Math.max(1.1, stepH*0.30*sizeMul);
-            const gap = Math.max(pr*2.8, w*0.045);
-            const people = Math.max(1, Math.floor(w/gap));
-            const offX = (w - people*gap)/2 + gap*0.5;
-            const seatY = rowBot - stepH*0.12;
-            for (let c=0;c<people;c++){
-              if (((c*7 + r*5) % 11) < 2) continue;               // ~18% empty seats so it's not a solid block
-              const px = L + offX + c*gap;
-              const flick = Math.sin(t*4 + r*1.9 + c*1.3) > 0.35;
-              ctx.fillStyle = `hsl(${(c*47 + r*97)%360}, 42%, ${flick?58:40}%)`;                // muted shirt
-              ctx.fillRect(px-pr, seatY-pr*1.7, pr*2, pr*1.6);                                   // torso/shoulders
-              ctx.fillStyle = "#e3bd97";
-              ctx.beginPath(); ctx.arc(px, seatY-pr*2.0, pr*0.7, 0, 7); ctx.fill();              // head
-            }
-          }
-        };
-
-        // a concourse landing with a railing + balustrade ticks
-        const drawConcourse = (yTop) => {
-          ctx.fillStyle = "#252a3b"; ctx.fillRect(L, yTop, w, concH);
-          ctx.fillStyle = "#48506c"; ctx.fillRect(L, yTop, w, concH*0.30);                       // rail cap
-          ctx.fillStyle = "#1a1f2e";
-          const n = Math.max(6, Math.floor(w/24));
-          for (let i=0;i<n;i++){ const px = L + (i+0.5)*(w/n); ctx.fillRect(px, yTop+concH*0.3, Math.max(1,w*0.004), concH*0.7); }
-        };
-
-        // decks top-to-bottom so lower (nearer) decks draw last and overlap
-        drawDeck(yUpT,  yUpB,  3, 0.66);
-        drawConcourse(yCcAt);
-        drawDeck(yMidT, yMidB, 4, 0.82);
-        drawConcourse(yCcBt);
-        drawDeck(yLowT, yLowB, 4, 1.0);
-
-        // section aisles up the full bank
-        ctx.fillStyle = "#2b3043";
-        ctx.fillRect(L + w*0.34, seatTop, w*0.028, bankH);
-        ctx.fillRect(L + w*0.66, seatTop, w*0.028, bankH);
-
-        // side support frame holding the roof
-        ctx.fillStyle = "#3a4159";
-        ctx.fillRect(L, seatTop, w*0.022, bankH);
-        ctx.fillRect(R - w*0.022, seatTop, w*0.022, bankH);
-
-        // track-side perimeter wall + advertising hoarding
-        ctx.fillStyle = "#20242f"; ctx.fillRect(L, seatBot, w, baseY - seatBot);
-        ctx.fillStyle = "#e23b57"; ctx.fillRect(L, seatBot + frontH*0.28, w, frontH*0.40);
-
-        // canopy roof: shaded underside, bright slab, colored fascia
-        ctx.fillStyle = "#23283c"; ctx.fillRect(L - w*0.05, seatTop - roofH*0.20, w*1.10, roofH*0.40); // underside
-        ctx.fillStyle = "#565e7c"; ctx.fillRect(L - w*0.05, top, w*1.10, roofH*0.70);                  // slab
-        ctx.fillStyle = "#e23b57"; ctx.fillRect(L - w*0.05, top + roofH*0.70, w*1.10, roofH*0.16);     // fascia
-        break; }
+      // note: the grandstand is no longer a billboard sprite — it is drawn as a
+      // continuous roadside structure in renderStand() so it follows & faces the track.
       case "person": {
         const wave = Math.sin(t*5 + cx) * 0.3;
         ctx.fillStyle = "#ffd9b3"; ctx.beginPath(); ctx.arc(x, top+h*0.18, w*0.22, 0, 7); ctx.fill(); // head
