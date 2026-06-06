@@ -241,8 +241,8 @@ const offRoadLimit  = maxSpeed / 3.5;
 const centrifugal   = 0.32;
 
 // ---------- Zones ----------
-const ZONE = { FOREST: 0, BEACH: 1, NEON: 2 };
-const ZONE_NAME = ["Forest", "Beach", "Neon Strip"];
+const ZONE = { FOREST: 0, BEACH: 1, TUNNEL: 2, NEON: 3 };
+const ZONE_NAME = ["Forest", "Beach", "Tunnel", "Neon Strip"];
 
 const COLORS = {
   // per zone: light & dark variants of {road, grass, rumble, lane}
@@ -255,6 +255,12 @@ const COLORS = {
     light: { road:"#8d8d8d", grass:"#f2dca0", rumble:"#ffffff", lane:"#efefef" },
     dark:  { road:"#888888", grass:"#ecd28c", rumble:"#d9d9d9" },
     sky: ["#36b6ff", "#bfeeff"], fog: "#dff2ff"
+  },
+  tunnel: {
+    // grey stone — enclosed, so "grass" is the wall/floor surround and the sky is the ceiling
+    light: { road:"#5b5b60", grass:"#4c4c52", rumble:"#86868c", lane:"#c4c4cc" },
+    dark:  { road:"#565659", grass:"#444449", rumble:"#6f6f76" },
+    sky: ["#232327", "#55555c"], fog: "#33333a"
   },
   neon: {
     light: { road:"#2c2540", grass:"#1a0f33", rumble:"#ff2a4d", lane:"#58f5ff" },
@@ -306,19 +312,38 @@ function buildZone(target, hilly) {
   }
 }
 
+// A ~20s grey-stone tunnel with 4 really sharp alternating curves (flat, no hills).
+function buildTunnel() {
+  const sharp = 8.5;                       // sharper than CRV.hard (6.5)
+  addRoad(40, 60, 30, 0, 0);               // entrance straight
+  addRoad(18, 80, 18,  sharp, 0);          // sharp curve 1 (right)
+  addRoad(20, 36, 20,  0, 0);
+  addRoad(18, 80, 18, -sharp, 0);          // sharp curve 2 (left)
+  addRoad(20, 36, 20,  0, 0);
+  addRoad(18, 80, 18,  sharp, 0);          // sharp curve 3 (right)
+  addRoad(20, 36, 20,  0, 0);
+  addRoad(18, 80, 18, -sharp, 0);          // sharp curve 4 (left)
+  addRoad(30, 50, 40,  0, 0);              // exit straight
+}
+
 function buildTrack() {
   segments.length = 0; _curveIdx = 0;
   addRoad(8, 34, 8, 0, 0);                 // grid run-up (start line sits here)
   buildZone(ZONE_SEGS, "low");             // FOREST
   const z1 = segments.length;
   buildZone(ZONE_SEGS, "low");             // BEACH
-  const z2 = segments.length;
+  const zt0 = segments.length;
+  buildTunnel();                           // TUNNEL
+  const zt1 = segments.length;
   buildZone(ZONE_SEGS, "high");            // NEON
   addRoad(LEN.med, 40, 30, 0, 0);          // finish straight
 
   const total = segments.length;
   for (const s of segments) {
-    s.zone = s.index < z1 ? ZONE.FOREST : (s.index < z2 ? ZONE.BEACH : ZONE.NEON);
+    s.zone = s.index < z1 ? ZONE.FOREST
+           : s.index < zt0 ? ZONE.BEACH
+           : s.index < zt1 ? ZONE.TUNNEL
+           : ZONE.NEON;
   }
 
   // start & finish lines (chequered)
@@ -326,12 +351,12 @@ function buildTrack() {
   for (let i = START_SEG; i < START_SEG + 4; i++) segments[i].flag = "line";
   for (let i = FINISH_SEG; i < FINISH_SEG + 4; i++) segments[i].flag = "line";
 
-  decorate(z1, z2, total);
+  decorate(z1, zt0, zt1, total);
   trackLength = segments.length * segmentLength;
 }
 
 // ---------- Scenery placement ----------
-function decorate(z1, z2, total) {
+function decorate(z1, beachEnd, neonStart, total) {
   // FOREST: dense layered rainforest — near canopy, far canopy and understory on both sides
   for (let n = START_SEG + 8; n < z1 - 4; n++) {
     // near treeline hugging the road
@@ -345,12 +370,12 @@ function decorate(z1, z2, total) {
   }
   // BEACH: one long grandstand running ALONG the LEFT of the track, palms on the sea side (right)
   const standStart = z1 + 180, standEnd = z1 + 720;
-  for (let n = z1; n < z2 - 4; n++) {
+  for (let n = z1; n < beachEnd - 4; n++) {
     if (segments[n] && n >= standStart && n < standEnd) segments[n].stand = true; // continuous roadside stand
     if (n % 5 === 0) addSprite(n, "palm", 1 + rand(0.3, 1.6)); // palms on the sea side
   }
   // NEON: glowing pylons / arcade signs alternating
-  for (let n = z2; n < total - 6; n++) {
+  for (let n = neonStart; n < total - 6; n++) {
     if (n % 6 === 0) addSprite(n, "neon", -1.25);
     if (n % 6 === 3) addSprite(n, "neon",  1.25);
     if (n % 24 === 0) addSprite(n, "banner", 0); // arch banner over the road
@@ -595,7 +620,7 @@ function zoneColors(seg, alt){
   const z = zoneBase(seg);
   return alt ? z.light : z.dark;
 }
-function zoneBase(seg){ return seg.zone===ZONE.FOREST?COLORS.forest : seg.zone===ZONE.BEACH?COLORS.beach : COLORS.neon; }
+function zoneBase(seg){ return seg.zone===ZONE.FOREST?COLORS.forest : seg.zone===ZONE.BEACH?COLORS.beach : seg.zone===ZONE.TUNNEL?COLORS.tunnel : COLORS.neon; }
 
 function poly(x1,y1,x2,y2,x3,y3,x4,y4,color){
   ctx.fillStyle = color; ctx.beginPath();
@@ -646,6 +671,7 @@ function renderSky(){
   const g = ctx.createLinearGradient(0,0,0,H);
   g.addColorStop(0, sky[0]); g.addColorStop(0.62, sky[1]);
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+  if (seg.zone === ZONE.TUNNEL) return;   // enclosed — no sun, the gradient is the stone ceiling
   // sun / moon glow
   ctx.save();
   const cx = W*0.5 + (-playerX*40), cy = H*0.34;
@@ -702,6 +728,41 @@ function standCrowd(s, lo, hi, rows){
   }
 }
 
+// ---------- Enclosed grey-stone tunnel (walls/ceiling follow the road geometry) ----------
+const TUN_SPRING_H = 1300;     // world height of the walls, up to the ceiling springline
+function renderTunnel(s){
+  const sa=s.p1.screen, sb=s.p2.screen;
+  if (!sa.scale) return;
+  const WALL=1.30;                                   // wall plane, just outside the rumble
+  const lAx=sa.x-WALL*sa.w, rAx=sa.x+WALL*sa.w;
+  const lBx=sb.x-WALL*sb.w, rBx=sb.x+WALL*sb.w;
+  const yA=sa.y, yB=sb.y;
+  const tA=yA - sa.scale*TUN_SPRING_H*H*0.5;         // springline (wall top) near
+  const tB=yB - sb.scale*TUN_SPRING_H*H*0.5;         // far
+  // wall faces (lighter stone than the surround) define the vertical walls along the road
+  poly(lAx,yA, lBx,yB, lBx,tB, lAx,tA, "#5d5d64");
+  poly(rAx,yA, rBx,yB, rBx,tB, rAx,tA, "#5d5d64");
+  // springline shadow where wall meets ceiling
+  const sh1=Math.max(1,(yA-tA)*0.04), sh2=Math.max(1,(yB-tB)*0.04);
+  poly(lAx,tA, lBx,tB, lBx,tB+sh2, lAx,tA+sh1, "#34343a");
+  poly(rAx,tA, rBx,tB, rBx,tB+sh2, rAx,tA+sh1, "#34343a");
+  // vertical ribs / pilasters every few segments
+  if (s.index % 14 === 0){
+    const rw=Math.max(1,sa.w*0.05);
+    poly(lAx,yA, lAx+rw,yA, lAx+rw,tA, lAx,tA, "#48484e");
+    poly(rAx-rw,yA, rAx,yA, rAx,tA, rAx-rw,tA, "#48484e");
+  }
+  // dim ceiling lamp every so often
+  if (s.index % 16 === 0){
+    const r=Math.max(2, sa.w*0.045);
+    ctx.save();
+    ctx.shadowColor="rgba(255,205,130,0.85)"; ctx.shadowBlur=r*3.5;
+    ctx.fillStyle="rgba(255,228,175,0.92)";
+    ctx.beginPath(); ctx.ellipse(sa.x, tA, r*1.5, r*0.7, 0, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+}
+
 function render(){
   renderSky();
 
@@ -730,6 +791,15 @@ function render(){
     const fogColor = zoneBase(s).fog;
     renderFog(s.p2.screen.y, s.p1.screen.y - s.p2.screen.y, fog, fogColor);
     maxy = s.p2.screen.y;
+  }
+
+  // enclosed stone tunnel — far-to-near so nearer slices overlap farther ones
+  for (let n=drawDistance-1; n>=0; n--){
+    const i = base.index + n;
+    if (i >= segments.length) continue;
+    const s = segments[i];
+    if (s.zone !== ZONE.TUNNEL || !s.p1.screen.scale || s.p1.camera.z <= cameraDepth) continue;
+    renderTunnel(s);
   }
 
   // continuous roadside grandstand — far-to-near so nearer slices overlap farther ones
