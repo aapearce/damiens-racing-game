@@ -48,6 +48,22 @@
     border: 1px solid rgba(120,200,255,0.3); overflow: hidden; }
   #prog { height: 100%; width: 0%; background: linear-gradient(90deg, var(--neon-purple), var(--neon-cyan)); box-shadow: 0 0 12px var(--neon-cyan); }
 
+  #lap { font-size: 13px; font-weight: 800; color: #ffd34d; letter-spacing: 1px; margin-top: 2px; }
+
+  /* fuel gauge (right side) */
+  #fuel-wrap { position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 6px; z-index: 3; }
+  #fuel-wrap .fuel-cap { font-size: 16px; }
+  #fuel-track { width: 16px; height: min(230px, 34vh); border-radius: 9px;
+    background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.35);
+    overflow: hidden; display: flex; flex-direction: column-reverse; box-shadow: 0 0 10px rgba(0,0,0,0.4); }
+  #fuel-fill { width: 100%; height: 100%; background: linear-gradient(0deg, #ff7a1a, #ffd34d);
+    transition: height 0.12s linear; }
+  #fuel-wrap.low #fuel-fill { background: #ff3b3b; }
+  #fuel-wrap.low { animation: fuelflash 0.6s steps(2) infinite; }
+  @keyframes fuelflash { 50% { opacity: 0.45; } }
+  #fuel-wrap .fuel-lab { font-size: 10px; letter-spacing: 1px; opacity: 0.8; }
+
   /* ===== Start lights gantry ===== */
   #lights { position: fixed; top: 8%; left: 50%; transform: translateX(-50%); z-index: 25;
     display: none; gap: 12px; padding: 12px 18px; border-radius: 14px;
@@ -140,6 +156,7 @@
       <div class="panel" style="text-align:center">
         <div class="label">Stage</div>
         <div id="zone">Forest</div>
+        <div id="lap">Lap 1 / 3</div>
       </div>
       <div class="panel speedo">
         <div class="label">Speed</div>
@@ -147,6 +164,13 @@
       </div>
     </div>
     <div class="prog-wrap"><div id="prog"></div></div>
+  </div>
+
+  <!-- fuel gauge -->
+  <div id="fuel-wrap">
+    <div class="fuel-cap">⛽</div>
+    <div id="fuel-track"><div id="fuel-fill"></div></div>
+    <div class="fuel-lab">FUEL</div>
   </div>
 
   <!-- start lights -->
@@ -168,9 +192,9 @@
   <div id="start-screen" class="screen">
     <h1 class="title"><span class="l1">Damien's</span><span class="l2">Racing Game</span></h1>
     <div class="card">
-      <h3>🏁 90-second time trial</h3>
+      <h3>🏁 3-lap Grand Prix</h3>
       <div class="controls-help">
-        Blast through the <b>forest</b>, the <b>beach</b> past the grandstands, and the <b>neon strip</b> to the chequered flag.<br>
+        Race <b>3 laps</b> through the <b>forest</b>, <b>beach</b>, the <b>stone tunnel</b> and the <b>neon strip</b>. Watch your <b>⛽ fuel</b> — when it runs low, dive into the <b>pit</b> on the right by the start/finish line to refuel!<br>
         <span class="hint" id="ctrl-desktop"><b>↑</b> gas &nbsp; <b>↓</b> brake &nbsp; <b>← →</b> steer</span>
         <span class="hint" id="ctrl-touch" style="display:none">Use the on-screen pedals &amp; steering</span>
       </div>
@@ -328,7 +352,7 @@ function buildTunnel() {
 
 function buildTrack() {
   segments.length = 0; _curveIdx = 0;
-  addRoad(8, 34, 8, 0, 0);                 // grid run-up (start line sits here)
+  addRoad(8, 34, 8, 0, 0);                 // grid / pit straight (start-finish line sits here)
   buildZone(ZONE_SEGS, "low");             // FOREST
   const z1 = segments.length;
   buildZone(ZONE_SEGS, "low");             // BEACH
@@ -336,20 +360,26 @@ function buildTrack() {
   buildTunnel();                           // TUNNEL
   const zt1 = segments.length;
   buildZone(ZONE_SEGS, "high");            // NEON
-  addRoad(LEN.med, 40, 30, 0, 0);          // finish straight
+  const z3 = segments.length;
+  // main/finish straight — ramp elevation back to 0 so the lap loops seamlessly
+  addRoad(LEN.med, 60, 90, 0, -lastY()/segmentLength);
 
   const total = segments.length;
   for (const s of segments) {
     s.zone = s.index < z1 ? ZONE.FOREST
            : s.index < zt0 ? ZONE.BEACH
            : s.index < zt1 ? ZONE.TUNNEL
-           : ZONE.NEON;
+           : s.index < z3  ? ZONE.NEON
+           : ZONE.FOREST;                  // main straight matches the grid so the seam is clean
   }
 
-  // start & finish lines (chequered)
-  START_SEG = 30; FINISH_SEG = total - 36;
+  // single start/finish line (chequered) on the grid straight
+  START_SEG = 30;
   for (let i = START_SEG; i < START_SEG + 4; i++) segments[i].flag = "line";
-  for (let i = FINISH_SEG; i < FINISH_SEG + 4; i++) segments[i].flag = "line";
+
+  // pit lane (right side) just past the start/finish line
+  PIT_START = START_SEG + 5; PIT_END = START_SEG + 66;
+  for (let i = PIT_START; i < PIT_END; i++) if (segments[i]) segments[i].pit = true;
 
   decorate(z1, zt0, zt1, total);
   trackLength = segments.length * segmentLength;
@@ -357,13 +387,19 @@ function buildTrack() {
 
 // ---------- Scenery placement ----------
 function decorate(z1, beachEnd, neonStart, total) {
+  // PIT LANE: gas station on the right by the start/finish line, with entry/exit signs
+  addSprite(PIT_START - 2, "pitsign", 1.25);
+  for (let n = PIT_START; n < PIT_END; n++) {
+    if (n % 6 === 0) addSprite(n, "gas", 1.5);     // fuel station canopy + pumps on the right
+  }
   // FOREST: dense layered rainforest — near canopy, far canopy and understory on both sides
   for (let n = START_SEG + 8; n < z1 - 4; n++) {
-    // near treeline hugging the road
-    addSprite(n, "tree", (n % 2 ? 1 : -1) * (1.15 + rand(0.0, 0.7)));
+    const pit = n >= PIT_START - 4 && n < PIT_END + 4;   // keep the right side clear for the pit
+    // near treeline hugging the road (skip right side inside the pit so the station shows)
+    if (!(pit && n % 2 === 1)) addSprite(n, "tree", (n % 2 ? 1 : -1) * (1.15 + rand(0.0, 0.7)));
     // deeper canopy layer for a jungle wall
     if (n % 2 === 0) addSprite(n, "tree", -1.9 - rand(0.2, 2.2));
-    if (n % 2 === 1) addSprite(n, "tree",  1.9 + rand(0.2, 2.2));
+    if (n % 2 === 1 && !pit) addSprite(n, "tree",  1.9 + rand(0.2, 2.2));
     // understory shrubs/ferns close to the verge
     if (n % 3 === 0) addSprite(n, "bush", -1.02 - rand(0.0, 0.35));
     if (n % 3 === 1) addSprite(n, "bush",  1.02 + rand(0.0, 0.35));
@@ -387,7 +423,7 @@ function addSprite(n, type, offset) {
 function rand(a,b){ return a + Math.random()*(b-a); }
 function randSign(){ return Math.random()<0.5 ? -1 : 1; }
 
-let trackLength = 0, START_SEG = 0, FINISH_SEG = 0;
+let trackLength = 0, START_SEG = 0, PIT_START = 0, PIT_END = 0;
 
 // ---------- Player / state ----------
 let position = 0, speed = 0, playerX = 0;
@@ -395,6 +431,13 @@ const playerZ = cameraHeight * cameraDepth;
 let state = "ready";              // ready | countdown | racing | finished
 let raceMs = 0, startStamp = 0, finishMs = 0;
 let bumpT = 0;                    // suspension bounce phase
+
+// ---------- Race / fuel ----------
+const TOTAL_LAPS = 3;
+let lap = 1;                      // current lap (1..TOTAL_LAPS)
+let fuel = 1;                     // 0..1
+let lowFuelWarned = false;
+let lapLineZ = 0;                 // world z of the start/finish line
 
 // ---------- Input ----------
 const keys = { left:false, right:false, gas:false, brake:false };
@@ -467,12 +510,17 @@ function showCenter(txt, ms){
 
 function resetRace(){
   buildTrack();
-  position = START_SEG * segmentLength * 0.5; // sit on the grid, just behind the start line
+  lapLineZ = START_SEG * segmentLength;            // start/finish line
+  position = lapLineZ - segmentLength * 14;         // sit on the grid, just behind the line
   speed = 0; playerX = 0; raceMs = 0; bumpT = 0;
+  lap = 1; fuel = 1; lowFuelWarned = false;
   document.getElementById("zone").textContent = ZONE_NAME[ZONE.FOREST];
   document.getElementById("timer").textContent = "0:00.000";
   document.getElementById("speed").firstChild.textContent = "0";
   document.getElementById("prog").style.width = "0%";
+  document.getElementById("lap").textContent = "Lap 1 / " + TOTAL_LAPS;
+  document.getElementById("fuel-fill").style.height = "100%";
+  document.getElementById("fuel-wrap").classList.remove("low");
   const b = bestMs();
   document.getElementById("best").textContent = "Best: " + (b!=null ? fmt(b) : "—");
 }
@@ -511,7 +559,7 @@ function finishRace(){
   document.getElementById("result-head").textContent = isBest ? "New Record!" : "Finish!";
   document.getElementById("result-time").textContent = fmt(finishMs);
   const sub = document.getElementById("result-sub");
-  if (isBest) sub.innerHTML = 'Fastest lap yet — <span class="hl">top of the board!</span>';
+  if (isBest) sub.innerHTML = 'Fastest 3-lap race yet — <span class="hl">top of the board!</span>';
   else if (prevBest!=null) sub.innerHTML = 'Best is <span class="hl">'+fmt(prevBest)+'</span>';
   else sub.textContent = "";
 
@@ -580,33 +628,60 @@ function update(dt){
     if (keys.left)  playerX -= dx;
     if (keys.right) playerX += dx;
 
-    if (keys.gas)        speed += accel * dt;
-    else if (keys.brake) speed += breaking * dt;
-    else                 speed += decel * dt;
+    const seg = findSegment(position + playerZ);
+    const inPit = !!seg.pit && playerX > 0.35 && playerX < 1.75;   // pulled into the pit lane on the right
+
+    // ---- fuel: burns with distance (a full tank lasts ~1.5 laps), refills in the pit ----
+    if (fuel > 0) fuel = Math.max(0, fuel - (speed * dt) / (1.5 * trackLength));
+    if (inPit)    fuel = Math.min(1, fuel + 0.55 * dt);
+    const outOfFuel = fuel <= 0;
+
+    // throttle — engine cuts when the tank is dry (limp mode)
+    if (keys.gas && !outOfFuel) speed += accel * dt;
+    else if (keys.brake)        speed += breaking * dt;
+    else                        speed += decel * dt;
 
     // curve pushes you outward
-    const seg = findSegment(position + playerZ);
     playerX -= dx * speed/maxSpeed * seg.curve * centrifugal;
 
-    // off-road
-    if ((playerX < -1 || playerX > 1) && speed > offRoadLimit){
+    // off-road (the pit lane on the right is paved — no penalty there)
+    const onPavement = (playerX >= -1 && playerX <= 1) || inPit;
+    if (!onPavement && speed > offRoadLimit){
       speed += offRoadDecel * dt;
       bumpT += dt * 30;
     }
     playerX = Math.max(-2.4, Math.min(2.4, playerX));
-    speed = Math.max(0, Math.min(speed, maxSpeed));
+    const capSpeed = outOfFuel ? maxSpeed * 0.13 : maxSpeed;       // dry tank = crawl to the pit
+    speed = Math.max(0, Math.min(speed, capSpeed));
 
     position += speed * dt;
-    if (position >= FINISH_SEG * segmentLength){ position = FINISH_SEG*segmentLength; speed=0; finishRace(); }
+
+    // ---- lap counting: every full lap past the start/finish line ----
+    if (position >= lapLineZ + lap * trackLength){
+      if (lap >= TOTAL_LAPS){ speed = Math.min(speed, maxSpeed); finishRace(); }
+      else { lap++; beep(760,0.12); showCenter("Lap " + lap + " / " + TOTAL_LAPS, 1100); }
+    }
 
     bumpT += dt * (4 + 8*speed/maxSpeed);
+
+    // ---- fuel gauge + low-fuel warning ----
+    document.getElementById("fuel-fill").style.height = (fuel*100) + "%";
+    const fwrap = document.getElementById("fuel-wrap");
+    if (fuel < 0.22){
+      fwrap.classList.add("low");
+      if (!lowFuelWarned){ lowFuelWarned = true; showCenter("⛽ LOW FUEL — PIT!", 1500); }
+    } else {
+      fwrap.classList.remove("low");
+      if (fuel > 0.4) lowFuelWarned = false;
+    }
 
     // HUD
     document.getElementById("timer").textContent = fmt(raceMs);
     document.getElementById("speed").firstChild.textContent = Math.round(speed/maxSpeed*180);
-    document.getElementById("zone").textContent = ZONE_NAME[seg.zone];
-    const prog = (position - START_SEG*segmentLength) / ((FINISH_SEG-START_SEG)*segmentLength);
-    document.getElementById("prog").style.width = Math.max(0,Math.min(1,prog))*100 + "%";
+    document.getElementById("zone").textContent = inPit ? "Pit Lane" : ZONE_NAME[seg.zone];
+    document.getElementById("lap").textContent = "Lap " + Math.min(lap, TOTAL_LAPS) + " / " + TOTAL_LAPS;
+    const lapProg = (((position - lapLineZ) % trackLength) + trackLength) % trackLength / trackLength;
+    document.getElementById("prog").style.width = Math.max(0,Math.min(1,lapProg))*100 + "%";
   }
   engineUpdate();
 }
@@ -766,7 +841,9 @@ function renderTunnel(s){
 function render(){
   renderSky();
 
-  const base = findSegment(position);
+  const NSEG = segments.length;
+  const baseGlobal = Math.floor(position / segmentLength);
+  const base = segments[((baseGlobal % NSEG) + NSEG) % NSEG];
   const basePercent = (position % segmentLength) / segmentLength;
   const playerSeg = findSegment(position + playerZ);
   const playerPercent = ((position+playerZ) % segmentLength)/segmentLength;
@@ -775,19 +852,20 @@ function render(){
   let maxy = H, x = 0, dx = -(base.curve * basePercent);
   const camX = playerX * roadWidth;
 
+  // the track is a closed loop: wrap the segment index and add a full trackLength of z per lap
   for (let n=0; n<drawDistance; n++){
-    const i = base.index + n;
-    if (i >= segments.length) break;
-    const s = segments[i];
+    const gi = baseGlobal + n;
+    const s = segments[gi % NSEG];
+    const zOff = Math.floor(gi / NSEG) * trackLength;
     const fog = 1 - Math.exp(-(n/drawDistance)*(n/drawDistance)*fogDensity);
 
-    project(s.p1, camX - x,       playerY + cameraHeight, position);
-    project(s.p2, camX - x - dx,  playerY + cameraHeight, position);
+    project(s.p1, camX - x,       playerY + cameraHeight, position - zOff);
+    project(s.p2, camX - x - dx,  playerY + cameraHeight, position - zOff);
     x += dx; dx += s.curve;
     s.clip = maxy;
 
     if (s.p1.camera.z <= cameraDepth || s.p2.screen.y >= s.p1.screen.y || s.p2.screen.y >= maxy) continue;
-    renderSegment(s, Math.floor(s.index/rumbleLength)%2 === 0);
+    renderSegment(s, Math.floor(gi/rumbleLength)%2 === 0);
     const fogColor = zoneBase(s).fog;
     renderFog(s.p2.screen.y, s.p1.screen.y - s.p2.screen.y, fog, fogColor);
     maxy = s.p2.screen.y;
@@ -795,27 +873,21 @@ function render(){
 
   // enclosed stone tunnel — far-to-near so nearer slices overlap farther ones
   for (let n=drawDistance-1; n>=0; n--){
-    const i = base.index + n;
-    if (i >= segments.length) continue;
-    const s = segments[i];
+    const s = segments[(baseGlobal + n) % NSEG];
     if (s.zone !== ZONE.TUNNEL || !s.p1.screen.scale || s.p1.camera.z <= cameraDepth) continue;
     renderTunnel(s);
   }
 
   // continuous roadside grandstand — far-to-near so nearer slices overlap farther ones
   for (let n=drawDistance-1; n>=0; n--){
-    const i = base.index + n;
-    if (i >= segments.length) continue;
-    const s = segments[i];
+    const s = segments[(baseGlobal + n) % NSEG];
     if (!s.stand || !s.p1.screen.scale || s.p1.camera.z <= cameraDepth) continue;
     renderStand(s);
   }
 
   // sprites back-to-front
   for (let n=drawDistance-1; n>=0; n--){
-    const i = base.index + n;
-    if (i >= segments.length) continue;
-    const s = segments[i];
+    const s = segments[(baseGlobal + n) % NSEG];
     if (!s.sprites.length || !s.p1.screen.scale) continue;
     if (s.p1.camera.z <= cameraDepth) continue;   // skip sprites at/behind the camera (avoids runaway sizes)
     for (const sp of s.sprites){
@@ -834,7 +906,8 @@ function withClip(clipY, fn){ ctx.save(); ctx.beginPath(); ctx.rect(0,0,W, clipY
 const SPRITE_K = 0.3 * (1/80) * roadWidth;   // OutRun-style sprite scaling (~7.5)
 function spriteSize(type, scale){
   const base = { tree:[170,260], bush:[150,95], palm:[150,310], stand:[440,300],
-                 person:[55,115], neon:[95,260], banner:[1700,280] }[type] || [120,200];
+                 person:[55,115], neon:[95,260], banner:[1700,280],
+                 gas:[300,230], pitsign:[150,180] }[type] || [120,200];
   const f = scale * (W/2) * SPRITE_K;
   // clamp so a sprite that gets very close to the camera can't blow up the
   // draw cost (esp. the grandstand crowd loop).
@@ -929,6 +1002,37 @@ function drawSprite(type, scale, cx, baseY, clipY, seed=0){
         ctx.restore();
         ctx.fillStyle = "#ff2a4d"; ctx.fillRect(x-w/2, top, w*0.04, h);       // posts
         ctx.fillStyle = "#ff2a4d"; ctx.fillRect(x+w/2-w*0.04, top, w*0.04, h);
+        break; }
+      case "gas": {
+        // fuel station: canopy on posts + glowing GAS sign + two pumps
+        const topPost = top + h*0.34;
+        ctx.fillStyle = "#c2c8d2";
+        ctx.fillRect(x-w*0.40, topPost, w*0.06, baseY-topPost);
+        ctx.fillRect(x+w*0.34, topPost, w*0.06, baseY-topPost);
+        ctx.fillStyle = "#e23b57"; ctx.fillRect(x-w*0.50, top+h*0.20, w, h*0.15);   // canopy
+        ctx.fillStyle = "#ffffff"; ctx.fillRect(x-w*0.50, top+h*0.33, w, h*0.03);   // trim
+        ctx.save(); ctx.shadowColor = "#ffd34d"; ctx.shadowBlur = Math.max(6, w*0.07);
+        ctx.fillStyle = "#15192a"; ctx.fillRect(x-w*0.30, top, w*0.60, h*0.18);     // sign panel
+        ctx.fillStyle = "#ffd34d";
+        ctx.font = `900 ${Math.max(7, h*0.12)|0}px Arial`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("GAS", x, top+h*0.095);
+        ctx.restore();
+        ctx.fillStyle = "#2b3142";                                                  // pumps
+        ctx.fillRect(x-w*0.22, baseY-h*0.34, w*0.13, h*0.34);
+        ctx.fillRect(x+w*0.09, baseY-h*0.34, w*0.13, h*0.34);
+        ctx.fillStyle = "#ff6a3d";
+        ctx.fillRect(x-w*0.20, baseY-h*0.30, w*0.09, h*0.12);
+        ctx.fillRect(x+w*0.11, baseY-h*0.30, w*0.09, h*0.12);
+        break; }
+      case "pitsign": {
+        ctx.fillStyle = "#c2c8d2"; ctx.fillRect(x-w*0.06, top+h*0.34, w*0.12, baseY-(top+h*0.34)); // post
+        ctx.save(); ctx.shadowColor = "#58f5ff"; ctx.shadowBlur = Math.max(6, w*0.12);
+        ctx.fillStyle = "#0c2230"; ctx.fillRect(x-w*0.5, top, w, h*0.34);
+        ctx.strokeStyle = "#58f5ff"; ctx.lineWidth = Math.max(1.5, w*0.03); ctx.strokeRect(x-w*0.5, top, w, h*0.34);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = `900 ${Math.max(8, h*0.15)|0}px Arial`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("PIT →", x, top+h*0.17);
+        ctx.restore();
         break; }
     }
   });
