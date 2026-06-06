@@ -390,7 +390,7 @@ function decorate(z1, beachEnd, neonStart, total) {
   // PIT LANE: gas station on the right by the start/finish line, with entry/exit signs
   addSprite(PIT_START - 2, "pitsign", 1.25);
   for (let n = PIT_START; n < PIT_END; n++) {
-    if (n % 6 === 0) addSprite(n, "gas", 1.5);     // fuel station canopy + pumps on the right
+    if (n % 6 === 0) addSprite(n, "gas", 2.2);     // fuel station canopy + pumps along the far side of the pit lane
   }
   // FOREST: dense layered rainforest — near canopy, far canopy and understory on both sides
   for (let n = START_SEG + 8; n < z1 - 4; n++) {
@@ -402,7 +402,7 @@ function decorate(z1, beachEnd, neonStart, total) {
     if (n % 2 === 1 && !pit) addSprite(n, "tree",  1.9 + rand(0.2, 2.2));
     // understory shrubs/ferns close to the verge
     if (n % 3 === 0) addSprite(n, "bush", -1.02 - rand(0.0, 0.35));
-    if (n % 3 === 1) addSprite(n, "bush",  1.02 + rand(0.0, 0.35));
+    if (n % 3 === 1 && !pit) addSprite(n, "bush",  1.02 + rand(0.0, 0.35));
   }
   // BEACH: one long grandstand running ALONG the LEFT of the track, palms on the sea side (right)
   const standStart = z1 + 180, standEnd = z1 + 720;
@@ -629,7 +629,7 @@ function update(dt){
     if (keys.right) playerX += dx;
 
     const seg = findSegment(position + playerZ);
-    const inPit = !!seg.pit && playerX > 0.35 && playerX < 1.75;   // pulled into the pit lane on the right
+    const inPit = !!seg.pit && playerX > 0.7 && playerX < 2.5;     // pulled into the sunken pit lane on the right
 
     // ---- fuel: burns with distance (a full tank lasts ~1.5 laps), refills in the pit ----
     if (fuel > 0) fuel = Math.max(0, fuel - (speed * dt) / (1.5 * trackLength));
@@ -838,6 +838,45 @@ function renderTunnel(s){
   }
 }
 
+// ---------- Pit lane (sunken, with down-ramp in and up-ramp out) ----------
+const PIT_RAMP = 14;            // ramp length (segments) at each end
+const PIT_DROP_H = 480;         // world height the pit lane sits below the road
+const PIT_IN = 1.04, PIT_OUT = 2.55;
+function pitDF(local, total){   // 0 at the road edges of the zone, 1 across the sunken middle
+  if (local <= 0 || local >= total) return 0;
+  if (local < PIT_RAMP) return local / PIT_RAMP;            // ramp down (in)
+  if (local > total - PIT_RAMP) return (total - local) / PIT_RAMP; // ramp up (out)
+  return 1;
+}
+function renderPit(s){
+  const a = s.p1.screen, b = s.p2.screen;
+  const total = PIT_END - PIT_START;
+  const la = s.index - PIT_START;
+  const dfA = pitDF(la, total), dfB = pitDF(la + 1, total);
+  const dropA = a.scale * PIT_DROP_H * H * 0.5 * dfA;
+  const dropB = b.scale * PIT_DROP_H * H * 0.5 * dfB;
+  const xaIn = a.x + PIT_IN*a.w,  xaOut = a.x + PIT_OUT*a.w;
+  const xbIn = b.x + PIT_IN*b.w,  xbOut = b.x + PIT_OUT*b.w;
+  const yaT = a.y, ybT = b.y;                 // road-level lip
+  const yaL = a.y + dropA, ybL = b.y + dropB; // sunken pit-lane surface
+  // inner drop wall — the side of the ramp/pit you look down into
+  if (dfA > 0.01 || dfB > 0.01)
+    poly(xaIn, yaT, xbIn, ybT, xbIn, ybL, xaIn, yaL, "#23252b");
+  // pit-lane surface (sunken, darker than the road)
+  poly(xaIn, yaL, xaOut, yaL, xbOut, ybL, xbIn, ybL, "#474a52");
+  // outer kerb edge
+  poly(xaOut-0.07*a.w, yaL, xaOut, yaL, xbOut, ybL, xbOut-0.07*b.w, ybL, "#cfd4dd");
+  // bright kerb cap along the road edge (red/white)
+  poly(xaIn, yaT, xaIn+0.06*a.w, yaT, xbIn+0.06*b.w, ybT, xbIn, ybT,
+       Math.floor(s.index/4)%2 ? "#e23b57" : "#f4f4f4");
+  // down/up chevrons on the ramps
+  const onRamp = (la < PIT_RAMP) || (la > total - PIT_RAMP);
+  if (onRamp && Math.floor(s.index/3)%2===0){
+    const mid = (PIT_IN + PIT_OUT)/2;
+    poly(a.x+(mid-0.24)*a.w, yaL, a.x+(mid+0.24)*a.w, yaL, b.x+mid*b.w, ybL, b.x+mid*b.w, ybL, "rgba(255,255,255,0.5)");
+  }
+}
+
 function render(){
   renderSky();
 
@@ -869,6 +908,13 @@ function render(){
     const fogColor = zoneBase(s).fog;
     renderFog(s.p2.screen.y, s.p1.screen.y - s.p2.screen.y, fog, fogColor);
     maxy = s.p2.screen.y;
+  }
+
+  // sunken pit lane (with ramps) — far-to-near, drawn over the road-side ground
+  for (let n=drawDistance-1; n>=0; n--){
+    const s = segments[(baseGlobal + n) % NSEG];
+    if (!s.pit || !s.p1.screen.scale || s.p1.camera.z <= cameraDepth) continue;
+    renderPit(s);
   }
 
   // enclosed stone tunnel — far-to-near so nearer slices overlap farther ones
